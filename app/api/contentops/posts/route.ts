@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertContentOpsRequest } from "@/lib/contentops-auth";
@@ -38,6 +39,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ postId, sheetSyncFailed: !!sheetSyncFailed });
   } catch (e) {
     console.error("[contentops] POST /posts failed:", e);
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2022") {
+      const column =
+        e.meta && typeof e.meta === "object" && "column" in e.meta
+          ? (e.meta as { column: unknown }).column
+          : undefined;
+      const body =
+        column !== undefined
+          ? {
+              ok: false as const,
+              error: "schema_drift" as const,
+              code: "P2022" as const,
+              meta: { column },
+            }
+          : { ok: false as const, error: "schema_drift" as const, code: "P2022" as const };
+      return NextResponse.json(body, { status: 500 });
+    }
     return NextResponse.json({ error: (e as Error).message ?? "Processing failed" }, { status: 502 });
   }
 }

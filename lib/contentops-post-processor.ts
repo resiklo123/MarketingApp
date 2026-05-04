@@ -11,7 +11,7 @@ import {
   sanitizePathSegment,
 } from "@/lib/google-drive";
 import { generateDraftsJson, type DraftsJson } from "@/lib/openai-drafts";
-import { upsertPostingLogRow } from "@/lib/googleSheets";
+import { syncMasterSheetForPost } from "@/lib/googleSheets";
 import { prisma } from "@/lib/prisma";
 import { getOptionalRedis } from "@/lib/redis";
 import { sendTelegramDraftReadyMessage } from "@/lib/telegram";
@@ -156,9 +156,10 @@ export async function processNewContentOpsPost(input: {
       await prisma.post.update({ where: { id: post.id }, data: { status: STATUS_DRAFT_READY } });
       let sheetSyncFailed = false;
       try {
-        await upsertPostingLogRow(post.id);
+        sheetSyncFailed = await syncMasterSheetForPost(post.id, { includeAssets: true });
       } catch (sheetError) {
-        console.warn("[contentops] Sheets sync failed after TEST_MODE create:", sheetError);
+        const e = sheetError instanceof Error ? sheetError : new Error(String(sheetError));
+        console.error("[contentops] sheet sync failed", e.message, e.stack ?? "");
         sheetSyncFailed = true;
       }
       return { postId: post.id, sheetSyncFailed };
@@ -179,6 +180,7 @@ export async function processNewContentOpsPost(input: {
       moved.push({ meta, finalName, afterMove });
     }
 
+    // Drive files already moved above; a failure here leaves them orphaned in the canonical folder.
     await prisma.asset.createMany({
       data: moved.map(({ meta, finalName, afterMove }) => ({
         postId: post.id,
@@ -216,12 +218,22 @@ export async function processNewContentOpsPost(input: {
     const draftRows = draftCreatesFromJson(post.id, input.platforms, draftsJson);
     if (draftRows.length) await prisma.draft.createMany({ data: draftRows });
 
-    await prisma.post.update({ where: { id: post.id }, data: { status: STATUS_DRAFT_READY } });
+    await prisma.post.update({
+      where: { id: post.id },
+      data: {
+        status: STATUS_DRAFT_READY,
+        libraryFolderId: canonicalFolderId,
+        libraryFolderUrl: `https://drive.google.com/drive/folders/${canonicalFolderId}`,
+        byDateShortcutUrl: `https://drive.google.com/drive/folders/${byDateId}`,
+        byMachineShortcutUrl: `https://drive.google.com/drive/folders/${byMachineId}`,
+      },
+    });
     let sheetSyncFailed = false;
     try {
-      await upsertPostingLogRow(post.id);
+      sheetSyncFailed = await syncMasterSheetForPost(post.id, { includeAssets: true });
     } catch (sheetError) {
-      console.warn("[contentops] Sheets sync failed after create:", sheetError);
+      const e = sheetError instanceof Error ? sheetError : new Error(String(sheetError));
+      console.error("[contentops] sheet sync failed", e.message, e.stack ?? "");
       sheetSyncFailed = true;
     }
 

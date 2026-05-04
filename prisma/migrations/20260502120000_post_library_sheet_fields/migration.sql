@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Post" ADD COLUMN IF NOT EXISTS "libraryFolderId" TEXT,
+ADD COLUMN IF NOT EXISTS "libraryFolderUrl" TEXT,
+ADD COLUMN IF NOT EXISTS "byDateShortcutUrl" TEXT,
+ADD COLUMN IF NOT EXISTS "byMachineShortcutUrl" TEXT;
